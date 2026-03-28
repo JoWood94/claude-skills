@@ -232,9 +232,13 @@ Create the shell script:
    tmux send-keys -t "$PROJECT_NAME:w-lead"  "node agents/scripts/watch-lead.js" Enter
    tmux send-keys -t "$PROJECT_NAME:w-{name}" "node agents/scripts/watch-agent.js {name}" Enter
    ```
-8. Sleep 1 second, then start Claude Code in each agent window:
+8. Sleep 1 second, then start Claude Code in each agent window with `--dangerously-skip-permissions` for full autonomy (agents must not wait for human approval on tool calls):
    ```bash
-   tmux send-keys -t "$PROJECT_NAME:{name}" "claude" Enter
+   tmux send-keys -t "$PROJECT_NAME:{name}" "claude --dangerously-skip-permissions" Enter
+   ```
+   The lead window starts WITHOUT this flag — it talks to the user and needs human control:
+   ```bash
+   tmux send-keys -t "$PROJECT_NAME:lead" "claude" Enter
    ```
 9. Sleep 3 seconds, then inject onboarding prompt into each agent:
    ```bash
