@@ -98,7 +98,7 @@ This will be written into `agents/context/team-lead.md` so the Team Lead resumes
 
 ---
 
-## STEP 4 — Number of agents
+## STEP 3b — Number of agents
 
 Ask: "How many agents do you want? (1–8, not counting the Team Lead which is created automatically)"
 
