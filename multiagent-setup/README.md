@@ -40,13 +40,13 @@ You → Team Lead (Claude Code)
 
 **One-liner:**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/giuseppebosco/claude-skills/main/multiagent-setup/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/JoWood94/claude-skills/main/multiagent-setup/install.sh | bash
 ```
 
 **Manual:**
 ```bash
 mkdir -p ~/.claude/commands
-curl -fsSL https://raw.githubusercontent.com/giuseppebosco/claude-skills/main/multiagent-setup/multiagent-setup.md \
+curl -fsSL https://raw.githubusercontent.com/JoWood94/claude-skills/main/multiagent-setup/multiagent-setup.md \
   -o ~/.claude/commands/multiagent-setup.md
 ```
 
