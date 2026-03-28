@@ -294,7 +294,10 @@ Create the shell script with these exact behaviors:
    ```bash
    tmux send-keys -t "$SESSION:{name}" "You are Agent {NAME}. Read agents/context/{name}.md and tell me when ready." Enter
    ```
-   Do NOT inject a prompt into the lead window — the user talks to it directly.
+   Inject onboarding into the lead window too — so it resumes context automatically:
+   ```bash
+   tmux send-keys -t "$SESSION:lead" "You are the Team Lead of PROJECT_NAME. Read agents/context/team-lead.md and tell me when ready." Enter
+   ```
 9. Focus on lead window: `tmux select-window -t "$SESSION:lead"`
 10. Print instructions:
     ```
