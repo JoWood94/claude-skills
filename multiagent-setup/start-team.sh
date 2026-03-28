@@ -19,7 +19,7 @@ else
   echo "  [1] SAFE     — ogni operazione richiede conferma"
   echo "  [2] TRUSTED  — autonomia completa, nessuna conferma"
   echo ""
-  read -rp "  Scelta [1/2]: " choice
+  read -rp "  Scelta [1/2]: " choice </dev/tty
   echo ""
   case "$choice" in
     2) MODE="trusted" ;;
@@ -36,11 +36,17 @@ else
 fi
 echo ""
 
+# ─── Verifica tmux ───────────────────────────────────────────
+if ! command -v tmux &>/dev/null; then
+  echo "❌ tmux non trovato. Installa con: brew install tmux"
+  exit 1
+fi
+
 # ─── Termina sessione esistente ───────────────────────────────
 tmux kill-session -t "$SESSION" 2>/dev/null
 
 # ─── Crea tutte le finestre ───────────────────────────────────
-tmux new-session -d -s "$SESSION" -n "lead"   -c "$ROOT"
+tmux new-session -d -s "$SESSION" -n "lead"   -c "$ROOT" || { echo "❌ Errore tmux new-session. ROOT=$ROOT"; exit 1; }
 tmux new-window  -t "$SESSION"   -n "alpha"   -c "$ROOT"
 tmux new-window  -t "$SESSION"   -n "beta"    -c "$ROOT"
 tmux new-window  -t "$SESSION"   -n "gamma"   -c "$ROOT"
@@ -100,3 +106,10 @@ else
   echo "  ⚡ TRUSTED: agenti autonomi. Monitora w-lead per notifiche."
 fi
 echo ""
+echo "  Aggancio automatico al Team Lead tra 2 secondi..."
+echo "  (Ctrl+B + D per uscire senza chiudere)"
+echo ""
+sleep 2
+
+# Aggancio automatico alla finestra lead
+tmux attach -t "$SESSION:lead"

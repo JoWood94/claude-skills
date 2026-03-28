@@ -89,7 +89,16 @@ Use Bash to verify the directory exists. If not, warn and ask again.
 
 ---
 
-## STEP 3 — Number of agents
+## STEP 3 — Team Lead description
+
+Ask: "Describe the Team Lead role: who is it, what are its responsibilities, and how should it behave? (2–4 sentences)"
+
+Wait for answer. Save as LEAD_DESCRIPTION.
+This will be written into `agents/context/team-lead.md` so the Team Lead resumes with full context on every startup.
+
+---
+
+## STEP 4 — Number of agents
 
 Ask: "How many agents do you want? (1–8, not counting the Team Lead which is created automatically)"
 
@@ -152,6 +161,7 @@ If an `agents/` directory already exists, warn: "agents/ directory already exist
 
 Create `agents/context/team-lead.md` with:
 - Project name and root path
+- **Team Lead role description** (from LEAD_DESCRIPTION — write it verbatim at the top, under "## Chi sei")
 - Table of all agents: name | role | files | context file
 - Protocol for assigning tasks:
   1. Write task to `agents/state/{task-id}.md` with `status: in_progress`, `agent: {name}`
