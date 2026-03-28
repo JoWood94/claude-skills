@@ -63,9 +63,10 @@ Proceed normally from STEP 1.
 Tell the user:
 "I'll set up a real multi-agent system where:
 - Each agent is a **separate Claude Code instance** in its own tmux window
-- Agents communicate via **file watchers** (no fake role-playing)
+- Agents run with `--dangerously-skip-permissions` — fully autonomous, no human approval needed for tool calls
+- Agents communicate via **file watchers** that inject prompts directly into each terminal
 - You talk only to the **Team Lead** — tasks are distributed automatically
-- A watcher detects file changes and injects prompts into each agent's terminal
+- Nothing is committed or deployed without explicit Team Lead authorization
 
 I need to ask you a few questions first."
 
@@ -137,7 +138,7 @@ agents/
 agents/context/
 agents/inbox/
 agents/state/
-agents/gamma-reports/
+agents/reports/
 agents/scripts/
 ```
 
@@ -152,9 +153,23 @@ If an `agents/` directory already exists, warn: "agents/ directory already exist
 Create `agents/context/team-lead.md` with:
 - Project name and root path
 - Table of all agents: name | role | files | context file
-- Protocol: assign tasks by writing `agents/inbox/{name}.md`, read results from `agents/state/{task-id}.md`
-- Deploy policy: only when all assigned tasks are `status: done`
-- State file format (see step 7b)
+- Protocol for assigning tasks:
+  1. Write task to `agents/state/{task-id}.md` with `status: in_progress`, `agent: {name}`
+  2. Send to agent: `node agents/scripts/send-task.js {name} --file agents/state/{task-id}.md`
+  3. Wait for `w-lead` watcher notification
+  4. Read result from `agents/state/{task-id}.md`
+- **Deploy pipeline** (enforce this strictly):
+  ```
+  Agent implements → status: done
+  → QA agent reviews → QA report in agents/reports/
+  → Team Lead reads QA report
+  → Team Lead explicitly authorizes: "deploy authorized"
+  → Deploy agent pushes
+  ```
+- **Absolute rules**:
+  - Never authorize a push without QA approval first
+  - Never skip the QA step even for small changes
+- State file format (see 7b)
 - Startup prompt: `"You are the Team Lead of PROJECT_NAME. Read agents/context/team-lead.md and tell me when ready."`
 
 ### 7b. Agent context files
@@ -162,16 +177,37 @@ Create `agents/context/team-lead.md` with:
 For each agent, create `agents/context/{name}.md` with:
 - Agent name and role (full description)
 - Files this agent owns
-- How to receive tasks: read `agents/inbox/{name}.md` when notified
+- How to receive tasks: read `agents/inbox/{name}.md` when notified by watcher
 - How to report completion: update `agents/state/{task-id}.md`
 - State file format:
   ```
-  status: todo | in_progress | done | blocked
+  status: todo | in_progress | done | blocked | cancelled
   agent: {name}
   task: [description]
   completed: [what was done — fill in when done]
   blocked_by: [reason — fill in if blocked]
   ```
+
+- **⛔ ABSOLUTE RULES — must appear verbatim in every agent context file:**
+  ```
+  ## ⛔ ABSOLUTE RULES — read before any action
+
+  ### Never commit or push autonomously
+  NEVER run `git commit`, `git push`, or any git write operation without
+  explicit authorization from the Team Lead ("deploy authorized" or "push now").
+
+  The correct flow is:
+  1. Write the code / do the work
+  2. Update agents/state/{task-id}.md → status: done
+  3. STOP HERE — wait for Team Lead
+
+  After your work, a QA agent reviews it. Only after QA approval does the
+  Team Lead authorize the deploy agent to push.
+
+  ### When in doubt
+  Write `blocked_by: waiting for Team Lead instructions` and stop.
+  ```
+
 - Startup prompt: `"You are Agent {NAME}. Read agents/context/{name}.md and tell me when ready."`
 
 ---
@@ -180,31 +216,38 @@ For each agent, create `agents/context/{name}.md` with:
 
 Create the file with these exact behaviors:
 1. Accepts CLI argument `<agent-name>`
-2. Uses Node.js `fs.watch` on the `agents/inbox/` directory
+2. Uses Node.js `fs.watch` on the `agents/inbox/` directory (built-in `fs` only, no npm packages)
 3. On change of `{agent-name}.md`:
-   - Compares current mtime to `agents/inbox/{agent-name}.seen` to avoid double-processing
+   - Reads current mtime and compares to `agents/inbox/{agent-name}.seen` to avoid double-processing
    - Saves new mtime to `.seen` file
-   - Writes `agents/inbox/{agent-name}.response.md` → `status: in_progress`
-   - Runs: `tmux send-keys -t PROJECT_NAME:{agent-name} "You have a new task. Read agents/inbox/{agent-name}.md and process it." Enter`
-   - Logs: `[HH:MM:SS] [AGENT] prompt injected into tmux session`
-4. Also processes the file immediately on startup (in case a task was written before the watcher started)
+   - Writes `agents/inbox/{agent-name}.response.md` → `status: in_progress\ntimestamp: {ISO}`
+   - Runs: `tmux send-keys -t SESSION:{agent-name} "You have a new task from the Team Lead. Read agents/inbox/{agent-name}.md and process it." Enter`
+   - Logs: `[HH:MM:SS] [AGENT] Prompt injected into tmux session`
+4. Processes inbox immediately on startup (handles tasks written before watcher started)
 5. Logs startup: `[HH:MM:SS] [AGENT] Watcher started — listening on agents/inbox/{agent-name}.md`
+6. SESSION name is hardcoded to PROJECT_NAME
 
 ---
 
 ## STEP 9 — Generate agents/scripts/watch-lead.js
 
 Create the file with these exact behaviors:
-1. Uses `fs.watch` on the `agents/inbox/` directory
-2. On change of any `*.response.md` file:
+1. Uses Node.js `fs.watch` on **both** `agents/inbox/` AND `agents/state/` directories
+2. **On change in `agents/inbox/*.response.md`** (prompt injection status):
    - Debounce 200ms
-   - Read first line (status line)
-   - Log based on status:
-     - `status: done` → `✅ [AGENT] task completed — read agents/inbox/{name}.response.md`
-     - `status: in_progress` → `⏳ [AGENT] working...`
-     - `status: error` → `❌ [AGENT] reported an error — read agents/inbox/{name}.response.md`
-3. Tracks seen mtimes to avoid duplicate notifications
-4. Logs startup: `[HH:MM:SS] [LEAD] Watcher started — listening for agent responses`
+   - Read first line
+   - `status: in_progress` → log `⏳ [AGENT] working...`
+   - `status: error` → log `❌ [AGENT] error — read agents/inbox/{name}.response.md`
+   - (do NOT log `in_progress` as done — real completion comes from state files)
+3. **On change in `agents/state/*.md`** (real task completion):
+   - Debounce 200ms
+   - Read status line, agent line, task line
+   - `status: done` → log `✅ [AGENT] DONE: {filename} — "{task description}"`
+   - `status: blocked` → log `🔴 [AGENT] BLOCKED: {filename} — {blocked_by}`
+   - `status: cancelled` → log `🚫 [AGENT] CANCELLED: {filename}`
+   - `status: in_progress` → log `⏳ [AGENT] in progress: {filename}`
+4. Tracks seen mtimes separately for each directory to avoid duplicate notifications
+5. Logs startup: `[HH:MM:SS] [LEAD] Watcher started — inbox + state`
 
 ---
 
@@ -212,60 +255,70 @@ Create the file with these exact behaviors:
 
 Create the file with these exact behaviors:
 1. CLI: `node send-task.js <agent> "<text>"` or `node send-task.js <agent> --file <path>`
-2. Writes content to `agents/inbox/{agent}.md` with HTML comment timestamp at the top
-3. Prints: `[LEAD → AGENT] Task sent → agents/inbox/{agent}.md`
-4. Validates that agent name is one of the configured agents (hardcode the list)
+2. Validates agent name against hardcoded list of configured agents; exits with error if invalid
+3. Writes content to `agents/inbox/{agent}.md` with `<!-- sent: {ISO timestamp} -->` at the top
+4. Logs: `[LEAD → AGENT] Task sent → agents/inbox/{agent}.md`
+5. Logs: `Waiting for response in agents/inbox/{agent}.response.md`
 
 ---
 
 ## STEP 11 — Generate agents/scripts/start-team.sh
 
-Create the shell script:
-1. Set PROJECT_NAME and PROJECT_ROOT as variables at the top
-2. Kill existing session: `tmux kill-session -t "$PROJECT_NAME" 2>/dev/null`
-3. Create lead window: `tmux new-session -d -s "$PROJECT_NAME" -n lead -c "$PROJECT_ROOT"`
-4. For each agent: `tmux new-window -t "$PROJECT_NAME" -n {name} -c "$PROJECT_ROOT"`
-5. For each watcher: `tmux new-window -t "$PROJECT_NAME" -n w-{name} -c "$PROJECT_ROOT"`
-6. Add `w-lead` watcher window
-7. Start watchers (after all windows are created):
+Create the shell script with these exact behaviors:
+1. Variables at the top:
    ```bash
-   tmux send-keys -t "$PROJECT_NAME:w-lead"  "node agents/scripts/watch-lead.js" Enter
-   tmux send-keys -t "$PROJECT_NAME:w-{name}" "node agents/scripts/watch-agent.js {name}" Enter
+   SESSION="PROJECT_NAME"
+   ROOT="PROJECT_ROOT"
    ```
-8. Sleep 1 second, then start Claude Code in each agent window with `--dangerously-skip-permissions` for full autonomy (agents must not wait for human approval on tool calls):
+2. Kill existing session: `tmux kill-session -t "$SESSION" 2>/dev/null`
+3. Create lead window: `tmux new-session -d -s "$SESSION" -n lead -c "$ROOT"`
+4. For each agent: `tmux new-window -t "$SESSION" -n {name} -c "$ROOT"`
+5. For each watcher (one per agent + one for lead):
+   `tmux new-window -t "$SESSION" -n w-{name} -c "$ROOT"`
+   `tmux new-window -t "$SESSION" -n w-lead -c "$ROOT"`
+6. Start all watchers:
    ```bash
-   tmux send-keys -t "$PROJECT_NAME:{name}" "claude --dangerously-skip-permissions" Enter
+   tmux send-keys -t "$SESSION:w-lead"  "node agents/scripts/watch-lead.js" Enter
+   tmux send-keys -t "$SESSION:w-{name}" "node agents/scripts/watch-agent.js {name}" Enter
    ```
-   The lead window starts WITHOUT this flag — it talks to the user and needs human control:
+7. `sleep 1` then start Claude Code in agent windows with `--dangerously-skip-permissions`:
    ```bash
-   tmux send-keys -t "$PROJECT_NAME:lead" "claude" Enter
+   # Agents: fully autonomous — no human approval on tool calls
+   tmux send-keys -t "$SESSION:{name}" "claude --dangerously-skip-permissions" Enter
    ```
-9. Sleep 3 seconds, then inject onboarding prompt into each agent:
+   Lead window WITHOUT the flag (talks to user, needs human control):
    ```bash
-   tmux send-keys -t "$PROJECT_NAME:{name}" "You are Agent {NAME}. Read agents/context/{name}.md and tell me when ready." Enter
+   tmux send-keys -t "$SESSION:lead" "claude" Enter
    ```
-10. Focus on lead window: `tmux select-window -t "$PROJECT_NAME:lead"`
-11. Run `chmod +x` on itself
-12. Print clear instructions:
+8. `sleep 3` then inject onboarding prompts:
+   ```bash
+   tmux send-keys -t "$SESSION:{name}" "You are Agent {NAME}. Read agents/context/{name}.md and tell me when ready." Enter
+   ```
+   Do NOT inject a prompt into the lead window — the user talks to it directly.
+9. Focus on lead window: `tmux select-window -t "$SESSION:lead"`
+10. Print instructions:
     ```
     ✅ Multi-agent team started: PROJECT_NAME
 
-    Open a terminal (NOT VS Code) and run:
+    Open Terminal.app (NOT VS Code) and run:
       tmux attach -t PROJECT_NAME
 
     Navigate windows:
-      Ctrl+B + 0  → lead (your main terminal)
-      Ctrl+B + 1  → agent 1
-      Ctrl+B + 2  → agent 2
-      ...
-      Ctrl+B + W  → list all windows
-      Ctrl+B + D  → detach (keeps everything running)
+      Ctrl+B + 0        → lead (talk to Team Lead here)
+      Ctrl+B + 1..N     → agents
+      Ctrl+B + N+1..end → watchers (read-only monitors)
+      Ctrl+B + W        → list all windows
+      Ctrl+B + D        → detach (keeps everything running)
 
-    ⚠️  tmux shortcuts don't work inside VS Code terminal.
-        Use Terminal.app or any external terminal.
+    ⚠️  Ctrl+B does NOT work inside VS Code integrated terminal.
+        Always use Terminal.app or an external terminal for tmux.
 
-    To send a task from the lead terminal:
+    Send a task to an agent:
       node agents/scripts/send-task.js {agent} "do this"
+      node agents/scripts/send-task.js {agent} --file agents/state/task.md
+
+    Deploy pipeline:
+      Agent done → QA review → Team Lead authorizes → deploy agent pushes
     ```
 
 ---
@@ -275,16 +328,23 @@ Create the shell script:
 Create a clear README with:
 - One-line project description
 - Agent table: name | role | context file | inbox file
-- Quick start: `bash agents/scripts/start-team.sh` then `tmux attach -t PROJECT_NAME`
-- State file format reference
+- Quick start (2 commands: `bash agents/scripts/start-team.sh` → `tmux attach -t PROJECT_NAME`)
+- Deploy pipeline diagram:
+  ```
+  Agent implements → status: done
+  → QA agent reviews → agents/reports/QA-*.md
+  → Team Lead authorizes
+  → Deploy agent pushes
+  ```
+- State file format reference (all valid status values)
 - send-task.js usage examples
-- tmux cheatsheet (the 4–5 most useful shortcuts)
+- tmux cheatsheet (5 shortcuts max)
+- Warning: tmux shortcuts don't work in VS Code terminal
 
 ---
 
 ## STEP 13 — Make scripts executable
 
-Run:
 ```bash
 chmod +x PROJECT_ROOT/agents/scripts/start-team.sh
 ```
@@ -300,19 +360,22 @@ If yes:
 cd PROJECT_ROOT && bash agents/scripts/start-team.sh
 ```
 
-Then tell the user:
-"✅ Done! Open Terminal.app (not VS Code), run `tmux attach -t PROJECT_NAME`, and come back here to assign the first task."
+Tell the user:
+"✅ Done!
+- Open Terminal.app (not VS Code) and run: `tmux attach -t PROJECT_NAME`
+- The agent windows are already onboarding — give them ~10 seconds
+- Come back to your main Claude Code session to assign the first task"
 
-If no:
-"OK. When you're ready, run: `bash agents/scripts/start-team.sh`"
+If no: "OK. When ready: `bash agents/scripts/start-team.sh`"
 
 ---
 
 ## IMPORTANT RULES FOR THE CONFIGURATOR
 
-- Generate ALL files with concrete values — no placeholders like `{PROJECT_NAME}` in the actual generated files, replace them with the real values provided by the user
-- The watch scripts must use Node.js built-in `fs` module only — no external dependencies
-- If the user's project already has an `agents/` directory, never silently overwrite — always ask first
-- After generating each file, confirm with a single line: `✅ Created: path/to/file`
-- At the end, show a summary of all created files
-- Adapt language to match the user's language throughout the entire interaction
+- Generate ALL files with **concrete values** — replace PROJECT_NAME, PROJECT_ROOT, agent names with real values. No placeholders in generated files.
+- Watch scripts use Node.js built-in `fs` module **only** — zero npm dependencies
+- The `⛔ ABSOLUTE RULES` block must appear **verbatim** in every agent context file
+- Never silently overwrite existing `agents/` directory — always confirm first
+- After each file: confirm with `✅ Created: path/to/file`
+- Final summary: list all created files grouped by type
+- Match the user's language throughout
