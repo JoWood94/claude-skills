@@ -265,41 +265,53 @@ Create the file with these exact behaviors:
 ## STEP 11 — Generate agents/scripts/start-team.sh
 
 Create the shell script with these exact behaviors:
-1. Variables at the top:
+
+### Mode selection (at the top, before anything else)
+The script accepts an optional argument `--safe` or `--trusted`.
+If no argument is given, it shows an interactive menu:
+```
+[1] SAFE    — every tool call requires human confirmation
+              Recommended for first-time use.
+
+[2] TRUSTED — full autonomy, no confirmation required
+              Agents work without interruption.
+              Use only on code you trust.
+```
+- If `1` or no valid input: `AGENT_CMD="claude"`, `MODE="safe"`
+- If `2`: `AGENT_CMD="claude --dangerously-skip-permissions"`, `MODE="trusted"`
+
+The lead window **always** uses plain `claude` (no --dangerously-skip-permissions),
+regardless of mode — it talks to the user and needs human control.
+
+### Script structure:
+1. Variables: `SESSION="PROJECT_NAME"`, `ROOT="PROJECT_ROOT"`
+2. Mode selection menu (see above)
+3. Kill existing session: `tmux kill-session -t "$SESSION" 2>/dev/null`
+4. Create all windows: lead, one per agent, one per watcher + w-lead
+5. Start all watchers:
    ```bash
-   SESSION="PROJECT_NAME"
-   ROOT="PROJECT_ROOT"
-   ```
-2. Kill existing session: `tmux kill-session -t "$SESSION" 2>/dev/null`
-3. Create lead window: `tmux new-session -d -s "$SESSION" -n lead -c "$ROOT"`
-4. For each agent: `tmux new-window -t "$SESSION" -n {name} -c "$ROOT"`
-5. For each watcher (one per agent + one for lead):
-   `tmux new-window -t "$SESSION" -n w-{name} -c "$ROOT"`
-   `tmux new-window -t "$SESSION" -n w-lead -c "$ROOT"`
-6. Start all watchers:
-   ```bash
-   tmux send-keys -t "$SESSION:w-lead"  "node agents/scripts/watch-lead.js" Enter
+   tmux send-keys -t "$SESSION:w-lead"   "node agents/scripts/watch-lead.js" Enter
    tmux send-keys -t "$SESSION:w-{name}" "node agents/scripts/watch-agent.js {name}" Enter
    ```
-7. `sleep 1` then start Claude Code in agent windows with `--dangerously-skip-permissions`:
+6. `sleep 1` then start Claude Code in each agent window with `$AGENT_CMD`:
    ```bash
-   # Agents: fully autonomous — no human approval on tool calls
-   tmux send-keys -t "$SESSION:{name}" "claude --dangerously-skip-permissions" Enter
+   tmux send-keys -t "$SESSION:{name}" "$AGENT_CMD" Enter
    ```
-   Lead window WITHOUT the flag (talks to user, needs human control):
+   In trusted mode, Claude shows a one-time security confirmation — auto-dismiss with:
    ```bash
-   tmux send-keys -t "$SESSION:lead" "claude" Enter
+   if [[ "$MODE" == "trusted" ]]; then
+     sleep 3 && tmux send-keys -t "$SESSION:{name}" "" Enter
+   fi
    ```
-8. `sleep 3` then inject onboarding prompts:
+7. `sleep 2` then inject onboarding into agents AND lead:
    ```bash
    tmux send-keys -t "$SESSION:{name}" "You are Agent {NAME}. Read agents/context/{name}.md and tell me when ready." Enter
+   tmux send-keys -t "$SESSION:lead"   "You are the Team Lead of PROJECT_NAME. Read agents/context/team-lead.md and tell me when ready." Enter
    ```
-   Inject onboarding into the lead window too — so it resumes context automatically:
-   ```bash
-   tmux send-keys -t "$SESSION:lead" "You are the Team Lead of PROJECT_NAME. Read agents/context/team-lead.md and tell me when ready." Enter
-   ```
-9. Focus on lead window: `tmux select-window -t "$SESSION:lead"`
-10. Print instructions:
+8. Focus lead window: `tmux select-window -t "$SESSION:lead"`
+9. Print instructions including active mode and reminder about tmux in VS Code:
+   - In safe mode: remind user to approve tool calls in each agent window
+   - In trusted mode: remind user to monitor w-lead for completion notifications
     ```
     ✅ Multi-agent team started: PROJECT_NAME
 
