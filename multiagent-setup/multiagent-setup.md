@@ -202,7 +202,7 @@ ROLE_DESCRIPTION
 
 ---
 
-### agents/{name}/.claude/settings.json — per ogni agente (incluso team-lead)
+### agents/{name}/.claude/settings.json — per ogni agente
 
 Pre-autorizza le letture su tutto il progetto — senza questo, Claude chiede conferma ogni volta che legge un file fuori da `agents/`.
 
@@ -216,7 +216,39 @@ Pre-autorizza le letture su tutto il progetto — senza questo, Claude chiede co
 }
 ```
 
-Create one file per agent at `agents/{name}/.claude/settings.json` and `agents/team-lead/.claude/settings.json`. Claude Code loads settings from the working directory upward, so each agent picks up its own file automatically.
+Create one file per agent at `agents/{name}/.claude/settings.json`. Claude Code loads settings from the working directory upward, so each agent picks up its own file automatically.
+
+---
+
+### agents/team-lead/.claude/settings.json — solo team-lead (diverso dagli agenti)
+
+Il team-lead riceve anche un hook `FileChanged` che sveglia la sessione Claude Code quando un agente completa (o blocca) un task — così non serve che l'utente scriva nulla per essere notificato.
+
+```json
+{
+  "permissions": {
+    "allow": [
+      "Read(**)"
+    ]
+  },
+  "hooks": {
+    "FileChanged": [
+      {
+        "matcher": "agents/state",
+        "hooks": [
+          {
+            "type": "command",
+            "asyncRewake": true,
+            "command": "sh -c 'file_path=$(jq -r .file_path); status=$(sed -n \"s/^status: //p\" \"$file_path\"); agent=$(sed -n \"s/^agent: //p\" \"$file_path\"); task=$(sed -n \"s/^task: //p\" \"$file_path\"); case \"$status\" in done|blocked|cancelled) echo \"{\\\"hookSpecificOutput\\\": {\\\"additionalContext\\\": \\\"[w-lead] ✅ $agent — $status: $task. Leggi $file_path\\\"}}\"; exit 2 ;; esac; exit 0'"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+`asyncRewake: true` + exit code 2 sveglia il modello con il contesto iniettato, senza bloccare la sessione.
 
 ---
 
