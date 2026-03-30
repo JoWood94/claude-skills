@@ -135,7 +135,7 @@ Confirm only what you did in max 2 lines.
 
 ### agents/team-lead/CLAUDE.md
 
-**Short — shared rules already in agents/CLAUDE.md. Max 15 lines.**
+**Short — shared rules already in agents/CLAUDE.md. Max 20 lines.**
 
 ```markdown
 # Team Lead — PROJECT_NAME
@@ -156,6 +156,11 @@ LEAD_DESCRIPTION
 - `agents/inbox/` = delivery. ALWAYS use send-task.js.
 - Deploy: done → "deploy authorized" → agent pushes → confirm green build
 - Never authorize push without verifying the work.
+
+## ⛔ NON scrivere mai codice direttamente
+Il Team Lead NON tocca file di progetto (src/, frontend/, server/, ecc.).
+Se vedi codice da correggere → crea un task e delegalo all'agente competente.
+Questa regola non ha eccezioni, nemmeno per fix "banali" o "di una riga".
 ```
 
 ---
